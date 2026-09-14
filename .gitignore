@@ -1,0 +1,29 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+/.verify-build/
+
+# Env
+.env
+.env.local
+
+# Air-gap transfer artefacts
+/cvefeed-bundle.tar.gz
+
+# Release artefacts
+/release/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

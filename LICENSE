@@ -1,0 +1,27 @@
+cvefeed Source-Available License
+Copyright (c) 2026 Oğuz ALBAŞ. All rights reserved.
+
+Permission is granted, free of charge, to any person obtaining a copy of this
+software and associated documentation files (the "Software") to view, run,
+and evaluate the Software for personal, educational, research, or internal
+non-commercial purposes, subject to the following conditions:
+
+1. This copyright notice and this permission notice must be retained in all
+   copies or substantial portions of the Software.
+2. Redistribution, publication of modified versions, sublicensing, resale,
+   offering the Software as a hosted or managed service, or other commercial
+   use requires prior written permission from the copyright holder.
+3. No trademark rights are granted by this license.
+4. Vulnerability records, advisories, scores, identifiers, and other data
+   retrieved from upstream providers are not relicensed by this file. Their
+   original licenses, terms, notices, and attribution requirements continue to
+   apply. See the "Attribution and licence" section of README.md and
+   GET /v1/attribution.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

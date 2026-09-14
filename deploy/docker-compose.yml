@@ -1,0 +1,152 @@
+name: cvefeed
+
+# The database credentials reach the two Go containers as a DSN without a
+# password plus PGPASSWORD beside it. lib/pq reads PGPASSWORD when the DSN
+# carries none, and that is the only way to hand it a password that compose
+# cannot URL-escape: interpolating ${POSTGRES_PASSWORD} into
+# postgres://user:password@host broke on the first @, /, # or % in it, and the
+# failure was "password authentication failed" — nothing pointed at the
+# encoding. The host-side CLI builds its own DSN from the same .env through the
+# config package, which has to escape for itself.
+x-database: &database
+  CVEFEED_DATABASE_URL: postgres://${POSTGRES_USER:-cvefeed}@postgres:5432/${POSTGRES_DB:-cvefeed}?sslmode=disable
+  PGPASSWORD: ${POSTGRES_PASSWORD:-cvefeed}
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    # Bound to the loopback address, not published to the network. The CLI runs
+    # outside the stack and its default DSN is localhost:5432, so without this
+    # a freshly built `cvefeed scan` cannot reach the corpus at all — while the
+    # database stays unreachable from anywhere but this machine.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cvefeed}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cvefeed}
+      POSTGRES_DB: ${POSTGRES_DB:-cvefeed}
+    # Ingest is one transaction per record, so commit latency — not CPU — is the
+    # ceiling. The corpus is fully rebuildable from upstream feeds, which makes
+    # relaxed durability the correct trade here rather than a shortcut.
+    command:
+      - postgres
+      - -c
+      - synchronous_commit=off
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_connections=64
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cvefeed} -d ${POSTGRES_DB:-cvefeed}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [cvefeed]
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      # Without this every compose-built image reports its version as "dev",
+      # and an image whose build cannot be named is one whose drift from the
+      # schema cannot be seen. `make up` exports it; a bare `docker compose`
+      # still gets "dev", which is at least honest about being unstamped.
+      args:
+        VERSION: ${CVEFEED_VERSION:-dev}
+        # 1 when ./vendor exists, so the build never reaches for a proxy the
+        # vendoring is there to avoid. `make up` exports it.
+        VENDORED: ${CVEFEED_VENDORED:-0}
+    image: cvefeed:local
+    command: ["migrate"]
+    environment:
+      <<: *database
+      CVEFEED_LOG_LEVEL: ${CVEFEED_LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks: [cvefeed]
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        VERSION: ${CVEFEED_VERSION:-dev}
+        VENDORED: ${CVEFEED_VENDORED:-0}
+    image: cvefeed:local
+    command: ["serve"]
+    restart: unless-stopped
+    environment:
+      <<: *database
+      CVEFEED_LISTEN_ADDR: ":8080"
+      CVEFEED_LOG_LEVEL: ${CVEFEED_LOG_LEVEL:-info}
+      CVEFEED_API_TOKEN: ${CVEFEED_API_TOKEN:-}
+      CVEFEED_NVD_API_KEY: ${CVEFEED_NVD_API_KEY:-}
+      CVEFEED_GITHUB_TOKEN: ${CVEFEED_GITHUB_TOKEN:-}
+      CVEFEED_CSAF_PROVIDERS: ${CVEFEED_CSAF_PROVIDERS:-}
+      CVEFEED_VULNCHECK_TOKEN: ${CVEFEED_VULNCHECK_TOKEN:-}
+      CVEFEED_SCHEDULE_ENABLED: ${CVEFEED_SCHEDULE_ENABLED:-true}
+      # Per-source cadence overrides, one per collector. Compose passes only
+      # what is listed here, so a CVEFEED_INTERVAL_* set in .env used to be
+      # read by the host-side CLI and never by the scheduler that actually
+      # polls. The names are the collector names in config.AllSources().
+      CVEFEED_INTERVAL_CVELIST: ${CVEFEED_INTERVAL_CVELIST:-}
+      CVEFEED_INTERVAL_NVD: ${CVEFEED_INTERVAL_NVD:-}
+      CVEFEED_INTERVAL_FKIE: ${CVEFEED_INTERVAL_FKIE:-}
+      CVEFEED_INTERVAL_VULNRICHMENT: ${CVEFEED_INTERVAL_VULNRICHMENT:-}
+      CVEFEED_INTERVAL_OSV: ${CVEFEED_INTERVAL_OSV:-}
+      CVEFEED_INTERVAL_GHSA: ${CVEFEED_INTERVAL_GHSA:-}
+      CVEFEED_INTERVAL_EUVD: ${CVEFEED_INTERVAL_EUVD:-}
+      CVEFEED_INTERVAL_GCVE: ${CVEFEED_INTERVAL_GCVE:-}
+      CVEFEED_INTERVAL_CSAF: ${CVEFEED_INTERVAL_CSAF:-}
+      CVEFEED_INTERVAL_KEV: ${CVEFEED_INTERVAL_KEV:-}
+      CVEFEED_INTERVAL_EPSS: ${CVEFEED_INTERVAL_EPSS:-}
+      # Opens POST /v1/scan/target, which makes this service connect to hosts a
+      # caller names. Off unless you turn it on: it reaches whatever this
+      # container reaches, including hosts the caller cannot.
+      CVEFEED_TARGET_SCAN_ENABLED: ${CVEFEED_TARGET_SCAN_ENABLED:-false}
+      CVEFEED_USER_AGENT: ${CVEFEED_USER_AGENT:-}
+      CVEFEED_HTTP_TIMEOUT: ${CVEFEED_HTTP_TIMEOUT:-}
+      CVEFEED_HTTP_MAX_RETRIES: ${CVEFEED_HTTP_MAX_RETRIES:-}
+      CVEFEED_INGEST_BATCH_SIZE: ${CVEFEED_INGEST_BATCH_SIZE:-}
+      CVEFEED_VULNLOOKUP_URL: ${CVEFEED_VULNLOOKUP_URL:-}
+      # Set CVEFEED_BUNDLE_PATH to run the collectors offline from a bundle.
+      # Inside this container the Makefile's air-gap targets keep the bundle at
+      # /var/lib/cvefeed/bundle/data, which is the value to use here.
+      CVEFEED_BUNDLE_PATH: ${CVEFEED_BUNDLE_PATH:-}
+      CVEFEED_RECORD_PATH: ${CVEFEED_RECORD_PATH:-}
+      CVEFEED_OFFLINE_ONLY: ${CVEFEED_OFFLINE_ONLY:-false}
+    ports:
+      - "${CVEFEED_PORT:-8080}:8080"
+    volumes:
+      # A named volume rather than a bind mount: the container runs as uid
+      # 10001, and a host directory created by the daemon is owned by root, so
+      # `make harvest` and `make pack` could never write into it. Everything
+      # the air-gap targets produce — the recording, the packed tarball, the
+      # unpacked bundle — lives in here, because each of those targets runs in
+      # a `--rm` container and this is the only path that outlives it. `make
+      # pack` and `make unpack` stream the tarball across the container
+      # boundary through stdout and stdin.
+      - bundle:/var/lib/cvefeed/bundle
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [cvefeed]
+
+volumes:
+  pgdata:
+  bundle:
+
+networks:
+  cvefeed:
+    driver: bridge

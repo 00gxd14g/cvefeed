@@ -1,0 +1,102 @@
+name: ci
+
+# Runs on every push to master and on every pull request. The same gate is
+# available locally as `make verify` (scripts/verify-release.sh), which runs
+# these steps against a disposable PostgreSQL 16 on any developer machine; a
+# fork without Actions minutes can rely on that and trigger this one by hand.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # The store and scan packages carry the tests that matter most — schema
+    # migration, merge and fold, enrichment, candidate selection — and every one
+    # of them skips itself without a database. A CI that ran only the hermetic
+    # tier passed while the SQL underneath it was broken, so the job brings its
+    # own PostgreSQL. Same image and settings as the README's local recipe.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cvefeed
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: cvefeed
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cvefeed -d cvefeed"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # A supported toolchain, not the module's minimum: see deploy/Dockerfile.
+          go-version: '1.26.8'
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      # One invocation covers all three test tiers this job can reach: the
+      # hermetic unit tests, the database-backed integration tests (enabled by
+      # the variable below), and the seed corpus of every Fuzz target, which
+      # `go test` runs without -fuzz. A separate `go test -run Fuzz` step used
+      # to repeat that last part and nothing else.
+      - name: test
+        env:
+          CVEFEED_TEST_DATABASE_URL: postgres://cvefeed:test@localhost:5432/cvefeed?sslmode=disable
+        run: go test -race -count=1 ./...
+
+      - name: build
+        run: CGO_ENABLED=0 go build -trimpath -o /dev/null ./cmd/cvefeed
+
+      # Both analysers are pinned. @latest made every run depend on whatever
+      # was published that morning: a staticcheck release that dropped the
+      # toolchain in use, or a new check, failed the build with no change in
+      # this repository. Bump these deliberately, with the toolchain.
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+          staticcheck ./...
+
+      # A vulnerability scanner shipping known-vulnerable dependencies is a poor
+      # advertisement, and the drift is silent: it was an unsupported toolchain
+      # and an outdated xz that this check found, neither of which any test saw.
+      # The tool is pinned; the vulnerability database it consults is not, which
+      # is the point.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck ./...
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build image
+        run: docker build -f deploy/Dockerfile -t cvefeed:ci --build-arg VERSION=ci .

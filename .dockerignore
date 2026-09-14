@@ -1,0 +1,17 @@
+# The build context is copied wholesale by `COPY . .`; keep it to what the
+# build actually needs.
+.git/
+.github/
+bin/
+dist/
+docs/
+_original_download/
+*.md
+.env
+.env.*
+!.env.example
+.verify-build/
+release/
+*.tar.gz
+.vscode/
+.idea/

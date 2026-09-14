@@ -1,0 +1,53 @@
+name: release
+
+# Tagging vX.Y.Z builds static binaries for the common platforms, writes a
+# SHA-256 manifest, and attaches everything to a GitHub Release for that tag.
+# The binaries are the same build the Makefile produces (`make build`), with
+# the tag as the embedded version. No third-party release action is involved:
+# the upload goes through the gh CLI that the runner already carries.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Keep in step with deploy/Dockerfile and ci.yml.
+          go-version: '1.26.8'
+          cache: true
+
+      - name: test
+        run: go test -count=1 ./...
+
+      - name: build
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            os="${target%/*}"; arch="${target#*/}"
+            out="release/cvefeed-${VERSION}-${os}-${arch}"
+            [ "$os" = windows ] && out="${out}.exe"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" -o "$out" ./cmd/cvefeed
+          done
+          (cd release && sha256sum * > SHA256SUMS)
+          ls -l release
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" release/* \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
