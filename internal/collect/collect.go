@@ -226,6 +226,14 @@ func (s *StoreSink) start() {
 	})
 }
 
+// persistAttempts bounds how often a lock-timed-out upsert is retried, and
+// persistRetryDelay is the wait before the first retry (the next waits twice
+// as long, and so on).
+const (
+	persistAttempts   = 4
+	persistRetryDelay = 3 * time.Second
+)
+
 // persist writes one record. The raw document is stored only after the merge
 // has committed: recording the content hash first would mark a record as
 // "already ingested" even though its upsert failed, and SkipUnchanged would
@@ -244,7 +252,23 @@ func (s *StoreSink) persist(ctx context.Context, v *model.Vulnerability) {
 			return
 		}
 	}
-	if _, err := s.Store.UpsertVulnerability(ctx, v); err != nil {
+	var err error
+	for attempt := 1; ; attempt++ {
+		_, err = s.Store.UpsertVulnerability(ctx, v)
+		// A lock timeout is another writer holding the same identifiers, not
+		// a fault in this record. Two of them in a five-hour OSV walk used to
+		// fail the whole run and hold its cursor at the start, so the next
+		// run re-read every record to reach the two. Wait and try again.
+		if err == nil || !store.IsLockTimeout(err) || attempt >= persistAttempts || ctx.Err() != nil {
+			break
+		}
+		s.Log.Warn("upsert waiting on a lock; retrying", "id", v.ID, "source", v.Source, "attempt", attempt)
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Duration(attempt) * persistRetryDelay):
+		}
+	}
+	if err != nil {
 		// One malformed record must not abort an ingest of 300,000. Log it,
 		// count it and carry on. RunOne observes the failure after Drain and
 		// holds the cursor so the record is offered again on the next run.

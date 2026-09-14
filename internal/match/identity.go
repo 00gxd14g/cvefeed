@@ -46,6 +46,9 @@ type identity struct {
 	// componentFamily is the component's own ecosystem family token, kept so
 	// Evaluate can tell a distribution build from an upstream artefact.
 	componentFamily string
+	// rowFamily is the statement's ecosystem family token, kept so Evaluate
+	// can tell a distribution tracker's claim from an upstream advisory's.
+	rowFamily string
 	// ecosystem is the published ecosystem name handed to version.SchemeFor.
 	// Knowing it is what turns a CUSTOM-typed distro range from undecidable
 	// into decidable: a CNA writing CUSTOM does not change how dpkg orders
@@ -108,6 +111,7 @@ func identify(c Component, a Affected) identity {
 	settle := func(id identity) identity {
 		id.ecosystem = eco
 		id.componentFamily = compFam
+		id.rowFamily = rowFam
 		if releaseUnknown {
 			if id.grade > idWeak {
 				id.grade--

@@ -200,6 +200,13 @@ Every finding includes a confidence level and the evidence that produced it. The
 | `probable` | vendor/product or ecosystem/name | ordered under a declared scheme |
 | `possible` | bare product or incomplete identity | generic/demoted evidence |
 
+For distribution packages (`scan -local`, or an SBOM with `pkg:deb`, `pkg:rpm`, `pkg:apk` identities) the levels carry one more distinction. The Ubuntu and Debian trackers export "needs-triage", "needed", "pending", "deferred" and "ignored" alike as an open-ended affected range, and the triage state is not in the record. So:
+
+- `confirmed` means the distribution has released a fix and the installed build predates it. That claim is checkable from the outside (`apt`, Launchpad, the tracker), and on a test host every confirmed finding was a missing security update.
+- `probable` means the distribution lists the package as affected with no fix released. Some of those are confirmed-and-unfixed, some are untriaged, and the tracker's web view can already say not-affected while the export still says affected. Review them; do not page on them.
+
+`cvefeed scan -local -min-confidence confirmed` is the setting for a pipeline that must not raise a false positive.
+
 Statements that cannot be decided are kept out of the positive finding count. Pass `-undecidable` to list them, and `-explain` to print the evidence sentence behind every row:
 
 ```bash

@@ -65,6 +65,14 @@ func (s *Store) Close() error { return s.db.Close() }
 // log line. A bounded wait turns it into an error the run can report and retry.
 const lockTimeout = 30 * time.Second
 
+// IsLockTimeout reports whether err is PostgreSQL giving up on a row lock
+// (SQLSTATE 55P03): the other writer held it past lockTimeout. Nothing about
+// the record is wrong, so the caller may simply try again.
+func IsLockTimeout(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "55P03"
+}
+
 // sourceRank orders collectors by authority. Lower is more authoritative.
 // The CNA record is the ground truth; CISA's ADP enrichment is next because it
 // is the designated authorised publisher; NVD follows, and community or

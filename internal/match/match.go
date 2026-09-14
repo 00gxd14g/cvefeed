@@ -240,6 +240,19 @@ func Evaluate(c Component, a Affected) (Result, Evidence) {
 			return Undecidable, ev
 		}
 		level, caps, demotions := confidenceFor(id, vt)
+		// A distribution tracker's open-ended claim. Ubuntu and Debian export
+		// "needs-triage", "needed", "pending", "deferred" and "ignored" alike
+		// as introduced 0 with no upper bound, and the triage state itself is
+		// not in the record: the same shape covers a package the distribution
+		// has confirmed and one it has not looked at yet, and the tracker's
+		// web view can already say not-affected while the export still says
+		// this. Confirmed is reserved for the claim that can be checked from
+		// the outside: the distribution released a fix and this build predates
+		// it. The open claim is still reported, one level down.
+		if level == Confirmed && distroFamilies[id.rowFamily] && openEndedClaim(a) {
+			level = Probable
+			caps = append(caps, "the "+osvEcosystemName(id.rowFamily)+" tracker lists the package as affected with no fixed version, a shape it also uses for packages it has not triaged")
+		}
 		ev.Confidence = level
 		ev.Reason = joinParts(vt.reason, id.reason,
 			"version evidence: "+vt.grade.String(), capText(caps), demotionText(demotions), noteText(vt.notes))
@@ -251,6 +264,22 @@ func Evaluate(c Component, a Affected) (Result, Evidence) {
 		ev.Reason = joinParts(vt.review+": "+vt.reason, id.reason, noteText(vt.notes))
 		return Undecidable, ev
 	}
+}
+
+// openEndedClaim reports whether every range on the statement is bounded
+// below only: no fixed version and no last affected version anywhere. Such a
+// statement says "affected, and no fix" and nothing about how that was
+// established.
+func openEndedClaim(a Affected) bool {
+	if len(a.Ranges) == 0 {
+		return false
+	}
+	for _, r := range a.Ranges {
+		if strings.TrimSpace(r.Fixed) != "" || strings.TrimSpace(r.LastAffected) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // statedVersion reports whether the inventory actually gave a version.
